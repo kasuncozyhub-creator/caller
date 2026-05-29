@@ -1,9 +1,30 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter_phone_direct_caller/flutter_phone_direct_caller.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-void main() {
+import 'firebase_options.dart';
+import 'screens/admin_dashboard.dart';
+import 'services/auto_caller.dart';
+
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  try {
+    if (kIsWeb) {
+      await Firebase.initializeApp(
+        options: DefaultFirebaseOptions.currentPlatform,
+      );
+    } else {
+      await Firebase.initializeApp();
+    }
+  } catch (e) {
+    debugPrint('Firebase initialization failed: $e');
+  }
+
   // Lock orientation to portrait for dialer consistency
   SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
   
@@ -36,7 +57,7 @@ class CallerApp extends StatelessWidget {
         ),
         useMaterial3: true,
       ),
-      home: const DialerHomeScreen(),
+      home: kIsWeb ? const AdminDashboardScreen() : const DialerHomeScreen(),
     );
   }
 }
@@ -49,9 +70,17 @@ class DialerHomeScreen extends StatefulWidget {
 }
 
 class _DialerHomeScreenState extends State<DialerHomeScreen> with SingleTickerProviderStateMixin {
+  static const _channel = MethodChannel('com.example.caller/direct_call');
   final TextEditingController _numberController = TextEditingController();
   late AnimationController _fadeController;
   late Animation<double> _fadeAnimation;
+
+  // Auto Calling state properties
+  AutoCaller? _autoCaller;
+  bool _isAutoCallingRunning = false;
+  String _autoCallingStatus = 'Idle. Waiting for admin to start job.';
+  int _autoCallingCurrentIndex = 0;
+  int _autoCallingTotalCount = 0;
 
   @override
   void initState() {
@@ -65,16 +94,31 @@ class _DialerHomeScreenState extends State<DialerHomeScreen> with SingleTickerPr
       curve: Curves.easeOut,
     );
     _fadeController.forward();
+
+    // Hook up real-time firebase calling engine
+    _autoCaller = AutoCaller(
+      onStateChanged: (isRunning, statusMessage, currentIndex, totalCount) {
+        if (mounted) {
+          setState(() {
+            _isAutoCallingRunning = isRunning;
+            _autoCallingStatus = statusMessage;
+            _autoCallingCurrentIndex = currentIndex;
+            _autoCallingTotalCount = totalCount;
+          });
+        }
+      },
+    )..startListening();
   }
 
   @override
   void dispose() {
+    _autoCaller?.stopListening();
     _numberController.dispose();
     _fadeController.dispose();
     super.dispose();
   }
 
-  // Handle number dial launch
+  // Handle direct phone call automatically
   Future<void> _makePhoneCall() async {
     final String phoneNumber = _numberController.text.trim();
     if (phoneNumber.isEmpty) {
@@ -82,11 +126,43 @@ class _DialerHomeScreenState extends State<DialerHomeScreen> with SingleTickerPr
       return;
     }
 
-    final Uri launchUri = Uri(
-      scheme: 'tel',
-      path: phoneNumber,
-    );
+    try {
+      // 1. Safe permission handling before calling native direct-dialer API
+      PermissionStatus status = await Permission.phone.status;
+      if (status.isDenied || status.isLimited || status.isRestricted) {
+        status = await Permission.phone.request();
+      }
 
+      if (status.isGranted) {
+        // 2. Call directly with speakerphone enabled using our custom platform channel
+        try {
+          final bool? res = await _channel.invokeMethod<bool>(
+            'callNumberWithSpeakerphone',
+            {'phoneNumber': phoneNumber},
+          );
+          if (res != true) {
+            await _fallbackToDialer(phoneNumber);
+          }
+        } catch (_) {
+          // Fallback to flutter_phone_direct_caller if platform channel fails
+          final bool? res = await FlutterPhoneDirectCaller.callNumber(phoneNumber);
+          if (res != true) {
+            await _fallbackToDialer(phoneNumber);
+          }
+        }
+      } else {
+        // 3. Fallback to pre-filled dialer if permission denied
+        await _fallbackToDialer(phoneNumber);
+      }
+    } catch (e) {
+      // 4. Clean error recovery
+      await _fallbackToDialer(phoneNumber);
+    }
+  }
+
+  // Fallback to url_launcher (which does not require CALL_PHONE permission)
+  Future<void> _fallbackToDialer(String phoneNumber) async {
+    final Uri launchUri = Uri(scheme: 'tel', path: phoneNumber);
     try {
       if (await canLaunchUrl(launchUri)) {
         await launchUrl(launchUri);
@@ -94,7 +170,7 @@ class _DialerHomeScreenState extends State<DialerHomeScreen> with SingleTickerPr
         await launchUrl(launchUri, mode: LaunchMode.externalApplication);
       }
     } catch (e) {
-      _showErrorSnackBar('Could not launch dialer app: $e');
+      _showErrorSnackBar('Could not launch dialer: $e');
     }
   }
 
@@ -180,7 +256,59 @@ class _DialerHomeScreenState extends State<DialerHomeScreen> with SingleTickerPr
             padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 16.0),
             child: Column(
               children: [
-                const SizedBox(height: 24),
+                const SizedBox(height: 12),
+
+                // Real-time Auto-Calling sync job banner
+                if (_isAutoCallingRunning)
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 24),
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF10B981).withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: const Color(0xFF10B981).withOpacity(0.3)),
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 10,
+                          height: 10,
+                          decoration: const BoxDecoration(
+                            color: Color(0xFF10B981),
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'AUTO-CALL ACTIVE',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(0xFF10B981),
+                                  letterSpacing: 1,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                _autoCallingStatus,
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w500,
+                                  color: Color(0xFF0F172A),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                else
+                  const SizedBox(height: 12),
 
                 // Large Display for Phone Number
                 Container(

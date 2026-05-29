@@ -27,12 +27,26 @@ class FirebaseService {
     return _db.collection('numbers').add({
       'phoneNumber': number,
       'name': name ?? '',
+      'isCalled': false,
+      'lastCalledAt': null,
       'createdAt': FieldValue.serverTimestamp(),
     });
   }
 
   Future<void> deleteNumber(String docId) {
     return _db.collection('numbers').doc(docId).delete();
+  }
+
+  Future<void> resetAllCalls() async {
+    final querySnapshot = await _db.collection('numbers').get();
+    final batch = _db.batch();
+    for (var doc in querySnapshot.docs) {
+      batch.update(doc.reference, {
+        'isCalled': false,
+        'lastCalledAt': null,
+      });
+    }
+    await batch.commit();
   }
 
   // Calling Jobs

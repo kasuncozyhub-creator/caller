@@ -111,7 +111,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               TextField(
                 controller: _emailController,
                 decoration: InputDecoration(
-                  hintText: 'admin@caller.com',
                   prefixIcon: const Icon(Icons.email_outlined, size: 20),
                   filled: true,
                   fillColor: const Color(0xFFF8FAFC),
@@ -145,7 +144,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 controller: _passwordController,
                 obscureText: true,
                 decoration: InputDecoration(
-                  hintText: '••••••••',
                   prefixIcon: const Icon(Icons.lock_outlined, size: 20),
                   filled: true,
                   fillColor: const Color(0xFFF8FAFC),
@@ -274,8 +272,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                   StreamBuilder<DocumentSnapshot>(
                     stream: _firebaseService.getCallJob(),
                     builder: (context, snapshot) {
-                      final status = snapshot.data?.get('status') ?? 'idle';
-                      final currentInterval = snapshot.data?.get('interval_minutes') ?? 5;
+                      final docExists = snapshot.data?.exists ?? false;
+                      final status = docExists ? (snapshot.data!.get('status') ?? 'idle') : 'idle';
+                      final currentInterval = docExists ? (snapshot.data!.get('interval_minutes') ?? 5) : 5;
                       final isRunning = status == 'running';
 
                       return Container(
@@ -377,6 +376,19 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                 elevation: 0,
                               ),
                             ),
+                            const SizedBox(width: 12),
+                            OutlinedButton.icon(
+                              onPressed: () => _firebaseService.resetAllCalls(),
+                              icon: const Icon(Icons.refresh_rounded, color: Color(0xFF64748B)),
+                              label: const Text('Reset Campaign', style: TextStyle(color: Color(0xFF0F172A), fontWeight: FontWeight.w600)),
+                              style: OutlinedButton.styleFrom(
+                                side: const BorderSide(color: Color(0xFFE2E8F0)),
+                                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                            ),
                           ],
                         ),
                       );
@@ -411,7 +423,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                               TextField(
                                 controller: numberAddController,
                                 decoration: InputDecoration(
-                                  hintText: '+1234567890',
                                   filled: true,
                                   fillColor: const Color(0xFFF8FAFC),
                                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
@@ -423,7 +434,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                               TextField(
                                 controller: nameAddController,
                                 decoration: InputDecoration(
-                                  hintText: 'John Doe',
                                   filled: true,
                                   fillColor: const Color(0xFFF8FAFC),
                                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
@@ -475,6 +485,16 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                               StreamBuilder<QuerySnapshot>(
                                 stream: _firebaseService.getNumbers(),
                                 builder: (context, snapshot) {
+                                  if (snapshot.hasError) {
+                                    return Padding(
+                                      padding: const EdgeInsets.symmetric(vertical: 40),
+                                      child: Text(
+                                        'Error loading directory: ${snapshot.error}',
+                                        textAlign: TextAlign.center,
+                                        style: const TextStyle(color: Colors.redAccent, fontWeight: FontWeight.w600),
+                                      ),
+                                    );
+                                  }
                                   if (snapshot.connectionState == ConnectionState.waiting) {
                                     return const Center(child: CircularProgressIndicator());
                                   }
@@ -501,13 +521,32 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                       final name = doc.get('name') as String;
                                       final number = doc.get('phoneNumber') as String;
                                       
+                                      final dataMap = doc.data() as Map<String, dynamic>?;
+                                      final isCalled = dataMap?['isCalled'] as bool? ?? false;
+                                      final Timestamp? lastCalledAt = dataMap?['lastCalledAt'] as Timestamp?;
+                                      
+                                      String timeString = '';
+                                      if (lastCalledAt != null) {
+                                        final dateTime = lastCalledAt.toDate().toLocal();
+                                        final hour = dateTime.hour > 12 ? dateTime.hour - 12 : (dateTime.hour == 0 ? 12 : dateTime.hour);
+                                        final amPm = dateTime.hour >= 12 ? 'PM' : 'AM';
+                                        final minute = dateTime.minute.toString().padLeft(2, '0');
+                                        timeString = '$hour:$minute $amPm';
+                                      }
+                                      
                                       return Padding(
                                         padding: const EdgeInsets.symmetric(vertical: 8),
                                         child: Row(
                                           children: [
                                             CircleAvatar(
-                                              backgroundColor: const Color(0xFF10B981).withOpacity(0.1),
-                                              child: const Icon(Icons.phone_rounded, color: Color(0xFF10B981), size: 18),
+                                              backgroundColor: isCalled 
+                                                  ? const Color(0xFF10B981).withOpacity(0.15)
+                                                  : const Color(0xFF64748B).withOpacity(0.1),
+                                              child: Icon(
+                                                isCalled ? Icons.check_rounded : Icons.phone_rounded, 
+                                                color: isCalled ? const Color(0xFF10B981) : const Color(0xFF64748B), 
+                                                size: 18
+                                              ),
                                             ),
                                             const SizedBox(width: 16),
                                             Expanded(
@@ -519,7 +558,29 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                                     style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
                                                   ),
                                                   const SizedBox(height: 2),
-                                                  Text(number, style: const TextStyle(color: Color(0xFF64748B), fontSize: 13)),
+                                                  Row(
+                                                    children: [
+                                                      Text(number, style: const TextStyle(color: Color(0xFF64748B), fontSize: 13)),
+                                                      if (timeString.isNotEmpty) ...[
+                                                        const SizedBox(width: 8),
+                                                        Container(
+                                                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                          decoration: BoxDecoration(
+                                                            color: const Color(0xFF10B981).withOpacity(0.1),
+                                                            borderRadius: BorderRadius.circular(6),
+                                                          ),
+                                                          child: Text(
+                                                            'Called at $timeString',
+                                                            style: const TextStyle(
+                                                              color: Color(0xFF059669),
+                                                              fontSize: 10,
+                                                              fontWeight: FontWeight.bold,
+                                                            ),
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    ],
+                                                  ),
                                                 ],
                                               ),
                                             ),

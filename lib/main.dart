@@ -14,13 +14,9 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
   try {
-    if (kIsWeb) {
-      await Firebase.initializeApp(
-        options: DefaultFirebaseOptions.currentPlatform,
-      );
-    } else {
-      await Firebase.initializeApp();
-    }
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
   } catch (e) {
     debugPrint('Firebase initialization failed: $e');
   }

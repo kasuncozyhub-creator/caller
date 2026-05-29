@@ -1,5 +1,5 @@
 import 'package:firebase_core/firebase_core.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatform, kIsWeb;
 
 class DefaultFirebaseOptions {
   static FirebaseOptions get currentPlatform {
@@ -14,12 +14,19 @@ class DefaultFirebaseOptions {
       );
     }
     
-    // For Android, we use native automatic configuration via google-services.json.
-    // If you prefer to declare it explicitly here, you can fill in the Android Firebase Options.
-    throw UnsupportedError(
-      'DefaultFirebaseOptions are not configured for this platform. '
-      'For Android, please place the "google-services.json" file in the "android/app" directory, '
-      'and initialize Firebase using "await Firebase.initializeApp();" without passing options.',
-    );
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.android:
+        return const FirebaseOptions(
+          apiKey: 'AIzaSyCzHhAOnm9IgbH7B-IkkZat-ak3iy4ZgtI',
+          appId: '1:912566889368:android:3e0ab2ce72f057864899ed',
+          messagingSenderId: '912566889368',
+          projectId: 'caller-adcf8',
+          storageBucket: 'caller-adcf8.firebasestorage.app',
+        );
+      default:
+        throw UnsupportedError(
+          'DefaultFirebaseOptions are not configured for this platform.',
+        );
+    }
   }
 }

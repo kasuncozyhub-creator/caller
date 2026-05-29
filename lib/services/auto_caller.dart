@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'firebase_service.dart';
 
 class AutoCaller {
@@ -59,6 +60,7 @@ class AutoCaller {
     try {
       final numbersSnapshot = await FirebaseFirestore.instance.collection('numbers').orderBy('createdAt', descending: false).get();
       _numbersQueue = numbersSnapshot.docs.map((doc) => {
+        'id': doc.id,
         'phoneNumber': doc.get('phoneNumber') as String,
         'name': doc.get('name') as String,
       }).toList();
@@ -69,10 +71,15 @@ class AutoCaller {
         return;
       }
       
-      // Call first number immediately
-      _executeNextCall();
+      // Display friendly waiting status message before the first call gap completes
+      onStateChanged(
+        true, 
+        'Waiting $_intervalMinutes min(s) before first call...', 
+        0, 
+        _numbersQueue.length
+      );
       
-      // Schedule subsequent calls
+      // Schedule calls at designated intervals
       _timer = Timer.periodic(Duration(minutes: _intervalMinutes), (timer) {
         _executeNextCall();
       });
@@ -97,7 +104,8 @@ class AutoCaller {
       _currentIndex = 0;
     }
     
-    final currentContact = _numbersQueue[_currentIndex];
+     final currentContact = _numbersQueue[_currentIndex];
+    final docId = currentContact['id']!;
     final number = currentContact['phoneNumber']!;
     final name = currentContact['name']!;
     
@@ -110,7 +118,28 @@ class AutoCaller {
     );
     
     try {
-      await _channel.invokeMethod('callNumberWithSpeakerphone', {'phoneNumber': number});
+      // Ensure phone calling permission is granted
+      PermissionStatus status = await Permission.phone.status;
+      if (status.isDenied || status.isLimited || status.isRestricted) {
+        status = await Permission.phone.request();
+      }
+
+      if (status.isGranted) {
+        // Update calling status in Firestore
+        FirebaseFirestore.instance.collection('numbers').doc(docId).update({
+          'isCalled': true,
+          'lastCalledAt': FieldValue.serverTimestamp(),
+        }).catchError((e) => print('Error updating status: $e'));
+
+        await _channel.invokeMethod('callNumberWithSpeakerphone', {'phoneNumber': number});
+      } else {
+        onStateChanged(
+          true, 
+          'Permission Denied: Cannot auto-dial without phone call permissions.', 
+          _currentIndex, 
+          _numbersQueue.length
+        );
+      }
     } on PlatformException catch (e) {
       onStateChanged(
         true, 

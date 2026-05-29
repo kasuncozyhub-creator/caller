@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "912566889368",
+    "project_id": "caller-adcf8",
+    "storage_bucket": "caller-adcf8.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:912566889368:android:3e0ab2ce72f057864899ed",
+        "android_client_info": {
+          "package_name": "com.example.caller"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCzHhAOnm9IgbH7B-IkkZat-ak3iy4ZgtI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "status": 1
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
